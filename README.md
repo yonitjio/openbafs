@@ -68,6 +68,8 @@ Adjust the codes according to your setup.
 - Due to one way communication between printer and bafs, to print with starting port other than 0 (T0) needs extra manual steps. 
 
 #### Note:
-Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
+- Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
+- Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.
 
-DISCLAIMER: This is an experimental project. It may or may not work. Use it at your own risk.
+#### DISCLAIMER: 
+This is an experimental project. It may or may not work. Use it at your own risk.
