@@ -66,6 +66,7 @@ Adjust the codes according to your setup.
 
 #### Known Issues:
 - Due to one way communication between printer and bafs, to print with starting port other than 0 (T0) needs extra manual steps. 
+- Also because the way bafs communicate with the printer, if you finished a print and want to print another, you may need to reset both printer and bafs and prepare the filaments all over again. Since both retain last tool, new print is most likely to begin with T0, so bafs will do switching proses. This behavior may not be what you want.
 
 #### Note:
 - Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
