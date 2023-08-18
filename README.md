@@ -68,6 +68,11 @@ Adjust the codes according to your setup.
 - Due to one way communication between printer and bafs, to print with starting port other than 0 (T0) needs extra manual steps. 
 - Also because the way bafs communicate with the printer, if you finished a print and want to print another, you may need to reset both printer and bafs and prepare the filaments all over again. Since both retain last tool, new print is most likely to begin with T0, so bafs will do switching proses. This behavior may not be what you want.
 
+#### Update 2023-08-18:
+To resolve both issues above the followings are made:
+- Custom gcode M709. This will reset bafs. Use this at the start of a print. 
+- Change of behavior, now bafs will ignore first toolchange gcode. This is to address inconsistent behavior of slicer which may or may not issue toolchange at the start of a print. Consequently, for every print, you need to prepare the starting filament so it's ready to print, i.e. loaded to nozzle.
+
 #### Note:
 - Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
 - Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.

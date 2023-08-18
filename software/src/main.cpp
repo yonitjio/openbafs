@@ -22,7 +22,7 @@ const int step_rotation = 200;
 const int dist_rotation = 34.56;
 
 const int retract_distance[] = {95, 95, 95, 95};
-const int feed_distance[] = {98, 98, 98, 98};
+const int feed_distance[] = {98, 98, 100, 100};
 const int slower_margin[] = {10, 10, 10, 10};
 
 int step_accelleration = 12000;
@@ -41,9 +41,9 @@ Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
 const byte servo_input_pin = 2;
 ServoInputPin<servo_input_pin> servoInput(SERVO_MIN_PULSE, SERVO_MAX_PULSE);
 
-int selection = 0;
-int last_selection = 0;
-int last_servo_input_pulse = 0;
+int selection = -1;
+int last_selection = -1;
+int last_servo_input_pulse = -1;
 
 int mode = 0; //0: operational, 1: configure
 // bool first_run = true;
@@ -53,7 +53,7 @@ int delta = abs((SERVO_MAX_PULSE - SERVO_MIN_PULSE) / SERVO_CNT);
 
 Servo servo[SERVO_CNT];
 const byte servo_pin[] = {SERVO_01, SERVO_02, SERVO_03, SERVO_04};
-const byte servo_on_deg[] =   {33, 148, 29, 157};
+const byte servo_on_deg[] = {32, 149, 29, 157};
 const byte servo_off_deg[] = {90, 90, 90, 90};
 
 String input_string;
@@ -95,20 +95,18 @@ void setup() {
 
 void switchFilament(){
   if (last_selection != selection) {
-    stepper.enableOutputs();
+    if (last_selection > -1) {
+      stepper.enableOutputs();
 
+      #ifdef DEBUG_SELECTION
+        Serial.print(" Turning on "); Serial.print(last_selection); Serial.println(".");
+      #endif
+      if (!servo[last_selection].attached())
+        servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+        
+      servo[last_selection].write(servo_on_deg[last_selection]);
+      delay(500);
 
-    #ifdef DEBUG_SELECTION
-      Serial.print(" Turning on "); Serial.print(last_selection); Serial.println(".");
-    #endif
-    if (!servo[last_selection].attached())
-      servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-      
-    servo[last_selection].write(servo_on_deg[last_selection]);
-    delay(500);
-
-    // retract 
-    // if (!first_run) {
       #ifdef DEBUG_STEPPER
         Serial.print(" Retracting: ");  Serial.print(last_selection); Serial.print(", "); Serial.print(retract_distance[last_selection]);
       #else
@@ -118,29 +116,26 @@ void switchFilament(){
       stepper.setCurrentPosition(0);
       stepper.runRelative(-getRetractDistance(last_selection));
       stepper.setSpeed(step_speed);
-    // }
-    delay(500);
+      delay(500);
 
-    #ifdef DEBUG_SELECTION
-      Serial.print(" Turning off "); Serial.print(last_selection); Serial.println(".");
-    #endif
-    if (!servo[last_selection].attached())
-      servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-      
-    servo[last_selection].write(servo_off_deg[last_selection]);
-    delay(1000);
+      #ifdef DEBUG_SELECTION
+        Serial.print(" Turning off "); Serial.print(last_selection); Serial.println(".");
+      #endif
+      if (!servo[last_selection].attached())
+        servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+        
+      servo[last_selection].write(servo_off_deg[last_selection]);
+      delay(1000);
 
-    #ifdef DEBUG_SELECTION
-      Serial.print(" Turning on "); Serial.print(selection); Serial.println(".");
-    #endif
-    if (!servo[selection].attached())
-      servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-      
-    servo[selection].write(servo_on_deg[selection]);
-    delay(500);
+      #ifdef DEBUG_SELECTION
+        Serial.print(" Turning on "); Serial.print(selection); Serial.println(".");
+      #endif
+      if (!servo[selection].attached())
+        servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+        
+      servo[selection].write(servo_on_deg[selection]);
+      delay(500);
 
-    // feed
-    // if (!first_run) {
       #ifdef DEBUG_STEPPER
         Serial.print(" Feeding: "); Serial.print(selection); Serial.print(", "); Serial.print(feed_distance[selection]);
       #else
@@ -152,19 +147,18 @@ void switchFilament(){
       stepper.setSpeed(step_slower_speed);
       stepper.runRelative(getSlowerMargin(selection));
       stepper.setSpeed(step_speed);
-    // }
-    delay(500);
+      delay(500);
 
-    #ifdef DEBUG_SELECTION
-      Serial.print(" Turning off "); Serial.print(selection); Serial.println(".");
-    #endif
-    if (!servo[selection].attached())
-      servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+      #ifdef DEBUG_SELECTION
+        Serial.print(" Turning off "); Serial.print(selection); Serial.println(".");
+      #endif
+      if (!servo[selection].attached())
+        servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
 
-    servo[selection].write(servo_off_deg[selection]);
-    delay(500);
+      servo[selection].write(servo_off_deg[selection]);
+      delay(500);
+    }
 
-    // first_run = false;
     last_selection = selection;
     
     stepper.disableOutputs();      
@@ -174,13 +168,23 @@ void switchFilament(){
 void doSwitch(){
   if (mode == 0) {
     int servo_input_pulse = servoInput.getPulse();
+
     if (last_servo_input_pulse != servo_input_pulse && abs(last_servo_input_pulse - servo_input_pulse) > 20) {
       #ifdef DEBUG_SERVO_INPUT
         Serial.print(" Pulse "); Serial.print(servo_input_pulse); Serial.print(", "); 
         Serial.print(last_servo_input_pulse); Serial.println(".");
       #endif
-      selection = mapSelection(servo_input_pulse);
-      switchFilament();
+
+      int mapValue = mapSelection(servo_input_pulse);
+      if (mapValue == 0) {
+        selection = -1;
+        last_selection = -1;
+        last_servo_input_pulse = -1;
+        mode = 0;
+      } else {
+        selection = mapValue - 1;
+        switchFilament();
+      }
       last_servo_input_pulse = servo_input_pulse;
     }
   }
@@ -351,7 +355,7 @@ int mapSelection(int s) {
   
   r = constrain(r, 0, range);
 
-  float calc = (r/range) * (SERVO_CNT - 1);
+  float calc = (r/range) * (SERVO_CNT); // -1 + 1 for reset value
   int rounded = round(calc);
   #ifdef DEBUG_SELECTION
     Serial.print("Mapping: "); Serial.print(s), Serial.print(", "); Serial.print(r); Serial.print(", "); Serial.print(calc); Serial.print(", "); Serial.println(rounded);
