@@ -73,9 +73,12 @@ To resolve both issues above the followings are made:
 - Custom gcode M709. This will reset bafs. Use this at the start of a print. 
 - Change of behavior, now bafs will ignore first toolchange gcode. This is to address inconsistent behavior of slicer which may or may not issue toolchange at the start of a print. Consequently, for every print, you need to prepare the starting filament so it's ready to print, i.e. loaded to nozzle.
 
-#### Note:
-- Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
-- Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.
-
 #### DISCLAIMER: 
 This is an experimental project. It may or may not work. Use it at your own risk.
+
+#### Notes:
+- Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
+- Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.
+- If you'd like to buy me a coffee or a tool or supplies for this project: 
+  
+  [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/yonitjio)
