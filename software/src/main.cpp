@@ -15,6 +15,7 @@
 #define STEPPER_EN 4
 #define STEPPER_STEP 10
 #define STEPPER_DIR 7
+#define SMALL_FEED_DISTANCE 2
 
 // Stepper
 const byte micro_step = 16;
@@ -61,9 +62,11 @@ String input_string;
 void onRising();
 void processPWM();
 void switchFilament();
+void feedFilament();
 String getValue(String data, char separator, int index);
 int mapSelection(int s);
 int getFeedDistance(int sel);
+int getSmallFeedDistance(int sel);
 int getSlowerMargin(int sel);
 int getRetractDistance(int sel);
 
@@ -91,6 +94,24 @@ void setup() {
     delay(250);
   }
 
+}
+
+void feedFilament(){
+  if (!servo[last_selection].attached())
+    servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+    
+  servo[last_selection].write(servo_on_deg[last_selection]);
+  delay(500);
+
+  stepper.enableOutputs();
+  stepper.setCurrentPosition(0);
+  stepper.runRelative(getSmallFeedDistance(last_selection));
+  stepper.setSpeed(step_speed);
+  stepper.disableOutputs();      
+  delay(500);
+
+  servo[last_selection].write(servo_off_deg[last_selection]);
+  delay(500);
 }
 
 void switchFilament(){
@@ -125,7 +146,7 @@ void switchFilament(){
         servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
         
       servo[last_selection].write(servo_off_deg[last_selection]);
-      delay(1000);
+      delay(500);
 
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning on "); Serial.print(selection); Serial.println(".");
@@ -181,8 +202,10 @@ void doSwitch(){
         last_selection = -1;
         last_servo_input_pulse = -1;
         mode = 0;
+      } else if(mapValue == 1) {
+        feedFilament();
       } else {
-        selection = mapValue - 1;
+        selection = mapValue - 2;
         switchFilament();
       }
       last_servo_input_pulse = servo_input_pulse;
@@ -238,6 +261,14 @@ void loop() {
 
       switch (cmd)
       {
+        case 'e': // small feed
+          {
+            long t = millis();
+            feedFilament();
+            t = millis() - t;
+            Serial.print("time: "); Serial.println(t);
+          }
+          break;
         case 'f': // switch filament p1 s selection
           {
             long t = millis();
@@ -292,13 +323,8 @@ void loop() {
             #endif
 
             s_val = constrain(s_val, 0, SERVO_CNT);
-            int d_val = servo_on_deg[s_val];
-
-            if (!servo[s_val].attached())
-              servo[s_val].attach(servo_pin[s_val], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-
-            Serial.print("Moving "); Serial.println(s_val);
-            servo[s_val].write(d_val);
+            last_selection = s_val;
+            selection = s_val;
           }
           break;
         case 'a': // test mapSelection p1 = angle
@@ -355,7 +381,7 @@ int mapSelection(int s) {
   
   r = constrain(r, 0, range);
 
-  float calc = (r/range) * (SERVO_CNT); // -1 + 1 for reset value
+  float calc = (r/range) * (SERVO_CNT + 1); // -1 + 1 for reset + 1 for feed
   int rounded = round(calc);
   #ifdef DEBUG_SELECTION
     Serial.print("Mapping: "); Serial.print(s), Serial.print(", "); Serial.print(r); Serial.print(", "); Serial.print(calc); Serial.print(", "); Serial.println(rounded);
@@ -399,6 +425,14 @@ int getRetractDistance(int sel) {
     return retract_distance[sel];
   } else {
     return -retract_distance[sel];
+  }
+}
+
+int getSmallFeedDistance(int sel) {
+  if (sel % 2 == 0) {
+    return SMALL_FEED_DISTANCE;
+  } else {
+    return -SMALL_FEED_DISTANCE;
   }
 }
 
