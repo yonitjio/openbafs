@@ -93,6 +93,7 @@ This is an experimental project. It may or may not work. Use it at your own risk
 - Even though it's modular, it's better to plan ahead to minimize costs, for example if you plan to use 4 filaments but want to start with 2 first, it's better to prepare the shaft and bolts for 4 filaments from the start. This is because the you need longer shaft and bolts for more ports for the filaments.
 - Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.
 - If you decided to use this with Klipper, you don't need the software part from this repo.
+- Branch SV is for pwm, SC is for serial.
 - If you'd like to buy me a coffee or a tool or supplies for this project, or you want to read more, click here:
 
   [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/yonitjio)
