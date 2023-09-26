@@ -1,7 +1,8 @@
 #define SERVOINPUT_SUPPRESS_WARNINGS
 
 #include <Servo.h>
-#include <ServoInput.h>
+#include <SoftwareSerial.h>
+#include <GCodeParser.h>
 #include "Stepper.h"
 
 #define SERVO_CNT 4
@@ -33,28 +34,29 @@ int step_slower_speed = 4000;
 
 Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
 
-#define DEBUG
-#define DEBUG_SELECTION
-#define DEBUG_SERVO_INPUT
+// #define DEBUG
+// #define DEBUG_SELECTION
+#define DEBUG_PRINTER_SERIAL
+#define DEBUG_GCODE
 // #define DEBUG_STEPPER
 
-// Servo Input
-const byte servo_input_pin = 2;
-ServoInputPin<servo_input_pin> servoInput(SERVO_MIN_PULSE, SERVO_MAX_PULSE);
+// Filament Sensor
+#define FILAMENT_SENSOR_PIN A0
+
+// Software Serial
+SoftwareSerial printer_serial(A4, A5); // RX, TX
+GCodeParser GCode = GCodeParser();
 
 int selection = -1;
 int last_selection = -1;
-int last_servo_input_pulse = -1;
 
-int mode = 0; //0: operational, 1: configure
+int mode = 0; //0: operational, 1: configure, 2: default serial as gcode receiver
 // bool first_run = true;
 
 // Servo
-int delta = abs((SERVO_MAX_PULSE - SERVO_MIN_PULSE) / SERVO_CNT);
-
 Servo servo[SERVO_CNT];
 const byte servo_pin[] = {SERVO_01, SERVO_02, SERVO_03, SERVO_04};
-const byte servo_on_deg[] = {32, 149, 29, 157};
+const byte servo_on_deg[] = {29, 157, 29, 157};
 const byte servo_off_deg[] = {90, 90, 90, 90};
 
 String input_string;
@@ -94,6 +96,12 @@ void setup() {
     delay(250);
   }
 
+  // Filament Sensor
+  pinMode(FILAMENT_SENSOR_PIN, INPUT_PULLUP);
+
+  // Printer Serial
+  printer_serial.begin(9600);
+  printer_serial.println("Ok");
 }
 
 void feedFilament(){
@@ -115,6 +123,10 @@ void feedFilament(){
 }
 
 void switchFilament(){
+  if (selection >= SERVO_CNT) {
+    return;
+  }
+
   if (last_selection != selection) {
     if (last_selection > -1) {
       stepper.enableOutputs();
@@ -186,38 +198,107 @@ void switchFilament(){
   }
 }
 
-void doSwitch(){
-  if (mode == 0) {
-    int servo_input_pulse = servoInput.getPulse();
-
-    if (last_servo_input_pulse != servo_input_pulse && abs(last_servo_input_pulse - servo_input_pulse) > 20) {
-      #ifdef DEBUG_SERVO_INPUT
-        Serial.print(" Pulse "); Serial.print(servo_input_pulse); Serial.print(", "); 
-        Serial.print(last_servo_input_pulse); Serial.println(".");
+void processGCode(){
+  if (!GCode.blockDelete){
+    if (GCode.HasWord('C')) { // C-Codes
+      int cCodeNumber = (int)GCode.GetWordValue('C');
+      #ifdef DEBUG_GCODE
+        Serial.print(" C: "); Serial.print(cCodeNumber); Serial.println(".");
       #endif
-
-      int mapValue = mapSelection(servo_input_pulse);
-      if (mapValue == 0) {
-        selection = -1;
-        last_selection = -1;
-        last_servo_input_pulse = -1;
-        mode = 0;
-      } else if(mapValue == 1) {
-        feedFilament();
-      } else {
-        selection = mapValue - 2;
-        switchFilament();
+      switch (cCodeNumber){
+        case 0: { // feed a little bit of filament
+          feedFilament();
+          if (mode == 0)
+            printer_serial.println("ok");
+          else
+            Serial.println("ok");
+        }
+        break;
+        default: {
+            Serial.println(" Unknown C code.");
+        }
+        break;
       }
-      last_servo_input_pulse = servo_input_pulse;
-    }
+    } else if (GCode.HasWord('M')) { // M-Codes
+      int mCodeNumber = (int)GCode.GetWordValue('M');
+      #ifdef DEBUG_GCODE
+        Serial.print(" M: "); Serial.print(mCodeNumber); Serial.println(".");
+      #endif
+      switch (mCodeNumber){
+        case 709: { // Reset
+          selection = -1;
+          last_selection = -1;
+          mode = 0;
+          #ifdef DEBUG_GCODE
+            Serial.println("BAFSD Reset.");
+          #endif
+        }
+        break;
+        case 412: { // Check filament
+          int state = digitalRead(FILAMENT_SENSOR_PIN);
+          #ifdef DEBUG_GCODE
+            Serial.print(" Filament: "); Serial.print(state); Serial.println(".");
+          #endif
+          if (state == LOW){  // low = filament present, high = filament not present
+            if (mode == 0)
+              printer_serial.println("ok");
+            else
+              Serial.println("ok");
+          } else {
+            if (mode == 0)
+              printer_serial.println("no");
+            else
+              Serial.println("no");
+          }
+        }
+        break;
+        default: {
+            Serial.println(" Unknown M code.");
+        }
+        break;
+      }
+    } else if (GCode.HasWord('T')) { // T-Codes
+      int tCodeNumber = (int)GCode.GetWordValue('T');
+      #ifdef DEBUG_GCODE
+        Serial.print(" T: "); Serial.print(tCodeNumber); Serial.println(".");
+      #endif
+      selection = tCodeNumber;
+      switchFilament();
+      if (mode == 0)
+        printer_serial.println("ok");
+      else
+        Serial.println("ok");
+  }
   }
 }
 
 void loop() {
-  doSwitch();
-  
-  String command = "";
+  if (mode == 0) {
+    if (printer_serial.available()) {
+      if (GCode.AddCharToLine(printer_serial.read())) {
+        #ifdef DEBUG_PRINTER_SERIAL
+          Serial.print(" Received: "); Serial.println(GCode.line);
+        #endif          
+        GCode.ParseLine();
+        processGCode();
+      }
+    }
+  }
 
+  if (mode == 2) {
+    if (Serial.available()) {
+      if (GCode.AddCharToLine(Serial.read())) {
+        #ifdef DEBUG_PRINTER_SERIAL
+          Serial.print(" Received: "); Serial.println(GCode.line);
+        #endif          
+        GCode.ParseLine();
+        processGCode();
+      }
+    }
+    return;
+  }
+
+  String command = "";
   if (Serial.available() > 0) {
     String input_string = Serial.readStringUntil('\n');
     input_string.trim();
@@ -239,11 +320,17 @@ void loop() {
       #ifdef DEBUG
         Serial.println("Entering M1 mode.");
       #endif
+    } else if (input_string.equalsIgnoreCase("m2")) {
+      mode = 2;
+      #ifdef DEBUG
+        Serial.println("Entering M2 mode.");
+      #endif
     } else if (input_string.equalsIgnoreCase("rs")) {
-      Serial.print("Selection: "); Serial.print(selection); 
+      Serial.print(" Mode: "); Serial.print(mode); 
+      Serial.print(" Selection: "); Serial.print(selection); 
       Serial.print(" milis: "); Serial.print(servo[selection].readMicroseconds());
       Serial.print(" deg: "); Serial.print(servo[selection].read());
-      // Serial.print(" First Run: "); Serial.print(first_run);
+      Serial.print(" filament: "); Serial.print(digitalRead(FILAMENT_SENSOR_PIN));
       Serial.println();
     }else {
       command = input_string;
@@ -269,7 +356,7 @@ void loop() {
             Serial.print("time: "); Serial.println(t);
           }
           break;
-        case 'f': // switch filament p1 s selection
+        case 'f': // switch filament p1 selection
           {
             long t = millis();
             selection = p1.toInt();
@@ -303,7 +390,11 @@ void loop() {
 
             stepper.enableOutputs();
             stepper.setCurrentPosition(0);
-            long steps = stepper.runRelative(dis_val);
+            #ifdef DEBUG
+              long steps = stepper.runRelative(dis_val);
+            #else
+              stepper.runRelative(dis_val);
+            #endif
             stepper.setSpeed(step_speed);
             stepper.disableOutputs();            
 
@@ -325,15 +416,6 @@ void loop() {
             s_val = constrain(s_val, 0, SERVO_CNT);
             last_selection = s_val;
             selection = s_val;
-          }
-          break;
-        case 'a': // test mapSelection p1 = angle
-          {
-            int s_val = p1.toInt();
-            int value = map(constrain(s_val, 0, 180), 0, 180, SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-            value = mapSelection(value);
-
-            Serial.print(s_val); Serial.print(" maps to "); Serial.println(value);
           }
           break;
         case 's': // set servo degree p1 = servo index, p2 = degree
@@ -361,32 +443,6 @@ void loop() {
       command = "";
     }
   }
-}
-
-int mapSelection(int s) {
-  int max = SERVO_MAX_PULSE;
-  int min = SERVO_MIN_PULSE;
-
-  if (SERVO_MAX_PULSE < SERVO_MIN_PULSE) {
-    max = SERVO_MIN_PULSE;
-    min = SERVO_MAX_PULSE;
-  }
-
-  // int ret = map(constrain(s, min, max), min, max, 0, SERVO_CNT - 1);
-  // return ret;
-
-  float range = max - min;
-  float s1 = constrain(s, min, max);
-  float r = s1 - min;
-  
-  r = constrain(r, 0, range);
-
-  float calc = (r/range) * (SERVO_CNT + 1); // -1 + 1 for reset + 1 for feed
-  int rounded = round(calc);
-  #ifdef DEBUG_SELECTION
-    Serial.print("Mapping: "); Serial.print(s), Serial.print(", "); Serial.print(r); Serial.print(", "); Serial.print(calc); Serial.print(", "); Serial.println(rounded);
-  #endif
-  return rounded;
 }
 
 String getValue(String data, char separator, int index)
