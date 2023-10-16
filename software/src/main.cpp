@@ -43,6 +43,9 @@ Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
 // Filament Sensor
 #define FILAMENT_SENSOR_PIN A0
 
+// Camera Remote
+#define CAM_PIN A3
+
 // Software Serial
 SoftwareSerial printer_serial(A4, A5); // RX, TX
 GCodeParser GCode = GCodeParser();
@@ -71,6 +74,7 @@ int getFeedDistance(int sel);
 int getSmallFeedDistance(int sel);
 int getSlowerMargin(int sel);
 int getRetractDistance(int sel);
+void triggerCamera();
 
 void setup() {
   Serial.begin(9600);
@@ -98,6 +102,9 @@ void setup() {
 
   // Filament Sensor
   pinMode(FILAMENT_SENSOR_PIN, INPUT_PULLUP);
+
+  // Camera Remote
+  pinMode(CAM_PIN, OUTPUT);
 
   // Printer Serial
   printer_serial.begin(9600);
@@ -138,7 +145,7 @@ void switchFilament(){
         servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
         
       servo[last_selection].write(servo_on_deg[last_selection]);
-      delay(500);
+      delay(250);
 
       #ifdef DEBUG_STEPPER
         Serial.print(" Retracting: ");  Serial.print(last_selection); Serial.print(", "); Serial.print(retract_distance[last_selection]);
@@ -149,7 +156,7 @@ void switchFilament(){
       stepper.setCurrentPosition(0);
       stepper.runRelative(-getRetractDistance(last_selection));
       stepper.setSpeed(step_speed);
-      delay(500);
+      delay(250);
 
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning off "); Serial.print(last_selection); Serial.println(".");
@@ -158,7 +165,7 @@ void switchFilament(){
         servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
         
       servo[last_selection].write(servo_off_deg[last_selection]);
-      delay(500);
+      delay(250);
 
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning on "); Serial.print(selection); Serial.println(".");
@@ -167,7 +174,7 @@ void switchFilament(){
         servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
         
       servo[selection].write(servo_on_deg[selection]);
-      delay(500);
+      delay(250);
 
       #ifdef DEBUG_STEPPER
         Serial.print(" Feeding: "); Serial.print(selection); Serial.print(", "); Serial.print(feed_distance[selection]);
@@ -180,7 +187,7 @@ void switchFilament(){
       stepper.setSpeed(step_slower_speed);
       stepper.runRelative(getSlowerMargin(selection));
       stepper.setSpeed(step_speed);
-      delay(500);
+      delay(250);
 
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning off "); Serial.print(selection); Serial.println(".");
@@ -189,13 +196,19 @@ void switchFilament(){
         servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
 
       servo[selection].write(servo_off_deg[selection]);
-      delay(500);
+      delay(250);
     }
 
     last_selection = selection;
     
     stepper.disableOutputs();      
   }
+}
+
+void triggerCamera(int d){
+    digitalWrite(CAM_PIN, LOW);
+    delay(d);
+    digitalWrite(CAM_PIN, HIGH);
 }
 
 void processGCode(){
@@ -250,6 +263,11 @@ void processGCode(){
             else
               Serial.println("no");
           }
+        }
+        break;
+        case 240: { // Camera
+          int duration = (int)GCode.GetWordValue('D');
+          triggerCamera(duration);
         }
         break;
         default: {
@@ -348,6 +366,12 @@ void loop() {
 
       switch (cmd)
       {
+        case 'c': // camera
+          {
+            int d_val = p1.toInt();
+            triggerCamera(d_val);
+          }
+        break;
         case 'e': // small feed
           {
             long t = millis();

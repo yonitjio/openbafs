@@ -86,6 +86,9 @@ To resolve both issues above the followings are made:
 - Custom gcode M709. This will reset bafs. Use this at the start of a print.
 - Change of behavior, now bafs will ignore first toolchange gcode. This is to address inconsistent behavior of slicer which may or may not issue toolchange at the start of a print. Consequently, for every print, you need to prepare the starting filament so it's ready to print, i.e. loaded to nozzle.
 
+#### Update 2023-10-16:
+Added function to use bluetooth remote shutter (YC1386-F).
+
 #### DISCLAIMER:
 This is an experimental project. It may or may not work. Use it at your own risk.
 
