@@ -77,17 +77,6 @@ There are plenty tutorials about using servos and stepper motor with arduino.
 
 Adjust the codes according to your setup.
 
-#### Known Issues:
-- Due to one way communication between printer and bafs, to print with starting port other than 0 (T0) needs extra manual steps.
-- Also because the way bafs communicate with the printer, if you finished a print and want to print another, you may need to reset both printer and bafs and prepare the filaments all over again. Since both retain last tool, new print is most likely to begin with T0, so bafs will do switching proses. This behavior may not be what you want.
-
-#### Update 2023-08-18:
-To resolve both issues above the followings are made:
-- Custom gcode M709. This will reset bafs. Use this at the start of a print.
-- Change of behavior, now bafs will ignore first toolchange gcode. This is to address inconsistent behavior of slicer which may or may not issue toolchange at the start of a print. Consequently, for every print, you need to prepare the starting filament so it's ready to print, i.e. loaded to nozzle.
-
-#### Update 2023-10-16:
-Added function to use bluetooth remote shutter (YC1386-F).
 
 #### DISCLAIMER:
 This is an experimental project. It may or may not work. Use it at your own risk.
@@ -97,6 +86,7 @@ This is an experimental project. It may or may not work. Use it at your own risk
 - Values in the code are for my setup. Most likely it won't work for yours. Adjust accordingly first.
 - If you decided to use this with Klipper, you don't need the software part from this repo.
 - Branch SV is for pwm, SC is for serial.
+- Refer to [wiki](https://github.com/yonitjio/openbafs/wiki) for more detail.
 - If you'd like to buy me a coffee or a tool or supplies for this project, or you want to read more, click here:
 
   [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/yonitjio)
