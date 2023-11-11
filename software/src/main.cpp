@@ -1,38 +1,47 @@
 #define SERVOINPUT_SUPPRESS_WARNINGS
 
-#include <Servo.h>
+#include <SPI.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
 #include <SoftwareSerial.h>
 #include <GCodeParser.h>
 #include "Stepper.h"
 
 #define SERVO_CNT 4
-#define SERVO_01 3
-#define SERVO_02 6
-#define SERVO_03 9
-#define SERVO_04 11
-#define SERVO_MIN_PULSE 540
-#define SERVO_MAX_PULSE 2400
+#define SERVO_SDA_PIN 4
+#define SERVO_SCL_PIN 5
+#define SERVO_MIN_MS 600
+#define SERVO_MAX_MS 2400
+#define SERVO_FREQ 50 // Analog servos run at ~50 Hz updates
+#define SERVO_OSC_FREQ 25800000
 
-#define STEPPER_EN 4
-#define STEPPER_STEP 10
-#define STEPPER_DIR 7
-#define SMALL_FEED_DISTANCE 2
+#define STEPPER_EN_PIN 9
+#define STEPPER_STEP_PIN 10
+#define STEPPER_DIR_PIN 11
+#define SMALL_FEED_DISTANCE 5
 
 // Stepper
 const byte micro_step = 16;
 const int step_rotation = 200;
 const int dist_rotation = 34.56;
 
-const int retract_distance[] = {95, 95, 95, 95};
-const int feed_distance[] = {98, 98, 100, 100};
+const int retract_distance[] = {107, 107, 107, 107};
+const int feed_distance[] = {120, 120, 120, 120};
 const int slower_margin[] = {10, 10, 10, 10};
 
-int step_accelleration = 12000;
-int step_speed = 12000;
-int step_max_speed = 12000;
-int step_slower_speed = 4000;
+float step_accelleration = 40000;
+float step_speed = 40000;
+float step_max_speed = 40000;
+float step_slower_speed = 1000;
 
-Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
+// speed is steps/second
+// 1.8deg stepper => 200 steps/revolution, 16 microsteps => 3200 steps/rev
+// mk8 brass gear diameter => 11mm
+// 1 revolution => 34.56mm
+// speed 4000 steps/sec => 1000/3200 rev/sec = 0.3125 rev/sec => 0.3125 * 34.56 mm/sec = 10.8 mm/sec
+// speed 12000 steps/sec => 12000/3200 = 3.75 rev/sec => 3.75 * 34.56 mm/sec = 129.6 mm/sec
+
+Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP_PIN, STEPPER_DIR_PIN);
 
 // #define DEBUG
 // #define DEBUG_SELECTION
@@ -41,25 +50,29 @@ Stepper stepper(AccelStepper::DRIVER, STEPPER_STEP, STEPPER_DIR);
 // #define DEBUG_STEPPER
 
 // Filament Sensor
-#define FILAMENT_SENSOR_PIN A0
+#define FILAMENT_SENSOR_PIN 2
 
 // Camera Remote
-#define CAM_PIN A3
+#define CAM_PIN 3
+#define CAM_IDLE 305000
+unsigned long cam_last_active = millis();
 
 // Software Serial
-SoftwareSerial printer_serial(A4, A5); // RX, TX
+#define SERIAL_RX_PIN 12
+#define SERIAL_TX_PIN 13
+
+SoftwareSerial printer_serial(SERIAL_RX_PIN, SERIAL_TX_PIN); // RX, TX
 GCodeParser GCode = GCodeParser();
 
 int selection = -1;
 int last_selection = -1;
 
 int mode = 0; //0: operational, 1: configure, 2: default serial as gcode receiver
-// bool first_run = true;
 
 // Servo
-Servo servo[SERVO_CNT];
-const byte servo_pin[] = {SERVO_01, SERVO_02, SERVO_03, SERVO_04};
-const byte servo_on_deg[] = {29, 157, 29, 157};
+Adafruit_PWMServoDriver servoController = Adafruit_PWMServoDriver();
+
+const byte servo_on_deg[] = {14, 162, 32, 152};
 const byte servo_off_deg[] = {90, 90, 90, 90};
 
 String input_string;
@@ -75,12 +88,16 @@ int getSmallFeedDistance(int sel);
 int getSlowerMargin(int sel);
 int getRetractDistance(int sel);
 void triggerCamera();
+void wakeupBluetooth();
+void servoWrite(uint8_t i, uint16_t value);
+void servoOff(uint8_t i);
+void servoOn(uint8_t i);
 
 void setup() {
   Serial.begin(9600);
 
   // Stepper
-  stepper.setEnablePin(STEPPER_EN);
+  stepper.setEnablePin(STEPPER_EN_PIN);
   stepper.setPinsInverted(true, false, true);
   stepper.setMinPulseWidth(1);
 
@@ -93,18 +110,18 @@ void setup() {
   stepper.setStepsPerRotation(step_rotation);
 
   // Servo
-  for(int n = 0; n < SERVO_CNT; n++)
-  {
-    servo[n].attach(servo_pin[n], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-    servo[n].write(90);
-    delay(250);
-  }
+  servoController.begin();
+  servoController.setOscillatorFrequency(SERVO_OSC_FREQ);
+  servoController.setPWMFreq(SERVO_FREQ);
+  delay(10);
 
   // Filament Sensor
   pinMode(FILAMENT_SENSOR_PIN, INPUT_PULLUP);
 
   // Camera Remote
   pinMode(CAM_PIN, OUTPUT);
+  digitalWrite(CAM_PIN, HIGH);
+  cam_last_active = millis();
 
   // Printer Serial
   printer_serial.begin(9600);
@@ -112,21 +129,18 @@ void setup() {
 }
 
 void feedFilament(){
-  if (!servo[last_selection].attached())
-    servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-    
-  servo[last_selection].write(servo_on_deg[last_selection]);
-  delay(500);
+  servoOn(last_selection);
+  delay(250);
 
   stepper.enableOutputs();
   stepper.setCurrentPosition(0);
   stepper.runRelative(getSmallFeedDistance(last_selection));
   stepper.setSpeed(step_speed);
-  stepper.disableOutputs();      
-  delay(500);
+  stepper.disableOutputs();
+  delay(250);
 
-  servo[last_selection].write(servo_off_deg[last_selection]);
-  delay(500);
+  servoOff(last_selection);
+  delay(250);
 }
 
 void switchFilament(){
@@ -141,10 +155,8 @@ void switchFilament(){
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning on "); Serial.print(last_selection); Serial.println(".");
       #endif
-      if (!servo[last_selection].attached())
-        servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-        
-      servo[last_selection].write(servo_on_deg[last_selection]);
+
+      servoOn(last_selection);
       delay(250);
 
       #ifdef DEBUG_STEPPER
@@ -161,19 +173,13 @@ void switchFilament(){
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning off "); Serial.print(last_selection); Serial.println(".");
       #endif
-      if (!servo[last_selection].attached())
-        servo[last_selection].attach(servo_pin[last_selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-        
-      servo[last_selection].write(servo_off_deg[last_selection]);
+      servoOff(last_selection);
       delay(250);
 
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning on "); Serial.print(selection); Serial.println(".");
       #endif
-      if (!servo[selection].attached())
-        servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-        
-      servo[selection].write(servo_on_deg[selection]);
+      servoOn(selection);
       delay(250);
 
       #ifdef DEBUG_STEPPER
@@ -192,23 +198,30 @@ void switchFilament(){
       #ifdef DEBUG_SELECTION
         Serial.print(" Turning off "); Serial.print(selection); Serial.println(".");
       #endif
-      if (!servo[selection].attached())
-        servo[selection].attach(servo_pin[selection], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
 
-      servo[selection].write(servo_off_deg[selection]);
+      servoOff(selection);
       delay(250);
     }
 
     last_selection = selection;
-    
-    stepper.disableOutputs();      
+
+    stepper.disableOutputs();
   }
 }
 
+void wakeupBluetooth(){
+  digitalWrite(CAM_PIN, LOW);
+  delay(50);
+  digitalWrite(CAM_PIN, HIGH);
+  cam_last_active = millis();
+}
+
 void triggerCamera(int d){
-    digitalWrite(CAM_PIN, LOW);
-    delay(d);
-    digitalWrite(CAM_PIN, HIGH);
+  Serial.println("Triggering Camera");
+  digitalWrite(CAM_PIN, LOW);
+  delay(d);
+  digitalWrite(CAM_PIN, HIGH);
+  cam_last_active = millis();
 }
 
 void processGCode(){
@@ -291,24 +304,27 @@ void processGCode(){
 }
 
 void loop() {
+  unsigned long now = millis();
+  if (now - cam_last_active > CAM_IDLE) {
+    wakeupBluetooth();
+  }
   if (mode == 0) {
     if (printer_serial.available()) {
       if (GCode.AddCharToLine(printer_serial.read())) {
         #ifdef DEBUG_PRINTER_SERIAL
           Serial.print(" Received: "); Serial.println(GCode.line);
-        #endif          
+        #endif
         GCode.ParseLine();
         processGCode();
       }
     }
   }
-
-  if (mode == 2) {
+  else if (mode == 2) {
     if (Serial.available()) {
       if (GCode.AddCharToLine(Serial.read())) {
         #ifdef DEBUG_PRINTER_SERIAL
           Serial.print(" Received: "); Serial.println(GCode.line);
-        #endif          
+        #endif
         GCode.ParseLine();
         processGCode();
       }
@@ -326,29 +342,50 @@ void loop() {
       // Servo
       for(int n = 0; n < SERVO_CNT; n++)
       {
-        servo[n].attach(servo_pin[n], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-        servo[n].write(servo_off_deg[n]);
+        servoOff(n);
         delay(250);
       }
-      #ifdef DEBUG
-        Serial.println("Entering M0 mode.");
-      #endif
+      Serial.println("Entering M0 mode.");
     } else if (input_string.equalsIgnoreCase("m1")) {
       mode = 1;
-      #ifdef DEBUG
-        Serial.println("Entering M1 mode.");
-      #endif
+      Serial.println("Entering M1 mode.");
     } else if (input_string.equalsIgnoreCase("m2")) {
       mode = 2;
-      #ifdef DEBUG
-        Serial.println("Entering M2 mode.");
-      #endif
+      Serial.println("Entering M2 mode.");
     } else if (input_string.equalsIgnoreCase("rs")) {
-      Serial.print(" Mode: "); Serial.print(mode); 
-      Serial.print(" Selection: "); Serial.print(selection); 
-      Serial.print(" milis: "); Serial.print(servo[selection].readMicroseconds());
-      Serial.print(" deg: "); Serial.print(servo[selection].read());
-      Serial.print(" filament: "); Serial.print(digitalRead(FILAMENT_SENSOR_PIN));
+
+      double pulselength;
+      pulselength = 1000000; // 1,000,000 us per second
+
+      uint16_t prescale = servoController.readPrescale();
+
+      prescale += 1;
+      pulselength *= prescale;
+      pulselength /= SERVO_OSC_FREQ;
+
+      uint16_t pwm = servoController.getPWM(selection);
+      uint16_t pulse = pwm * pulselength;
+
+      unsigned long camIdle = millis() - cam_last_active;
+
+      Serial.print(" Mode: "); Serial.println(mode);
+      Serial.print(" Selection: "); Serial.println(selection);
+      Serial.print(" pwm: "); Serial.println(pwm);
+      Serial.print(" pulse: "); Serial.println(pulse);
+      Serial.print(" pulseLength: "); Serial.println(pulselength);
+      Serial.print(" Cam Idle: "); Serial.println(camIdle);
+
+      if (pulse < SERVO_MIN_MS) {
+        pulse = SERVO_MIN_MS;
+      }
+
+      if (pulse > SERVO_MAX_MS) {
+        pulse = SERVO_MAX_MS;
+      }
+      uint16_t deg = map(pulse, SERVO_MIN_MS, SERVO_MAX_MS, 0, 180);
+
+      Serial.print(" deg: "); Serial.println(deg);
+      Serial.print(" filament: "); Serial.println(digitalRead(FILAMENT_SENSOR_PIN));
       Serial.println();
     }else {
       command = input_string;
@@ -401,7 +438,7 @@ void loop() {
             stepper.move(step_val);
             stepper.runToPosition();
             stepper.setSpeed(step_speed);
-            stepper.disableOutputs();            
+            stepper.disableOutputs();
           }
           break;
         case 'p': // move stepper p1 = distance, p2 = not used
@@ -420,7 +457,7 @@ void loop() {
               stepper.runRelative(dis_val);
             #endif
             stepper.setSpeed(step_speed);
-            stepper.disableOutputs();            
+            stepper.disableOutputs();
 
             t = millis() - t;
             #ifdef DEBUG
@@ -454,13 +491,46 @@ void loop() {
             s_val = constrain(s_val, 0, SERVO_CNT);
             d_val = constrain(d_val, 0, 180);
 
-            if (!servo[s_val].attached())
-              servo[s_val].attach(servo_pin[s_val], SERVO_MIN_PULSE, SERVO_MAX_PULSE);
-
             Serial.print("Moving "); Serial.println(s_val);
-            servo[s_val].write(d_val);
+            servoWrite(s_val, d_val);
           }
-          break;        
+          break;
+        case 't': // test servos and stepper
+          {
+              for(int n = 0; n < SERVO_CNT; n++)
+              {
+                servoWrite(n, 100);
+                delay(500);
+                servoOff(n);
+                delay(250);
+              }
+
+              stepper.enableOutputs();
+              stepper.setCurrentPosition(0);
+              stepper.runRelative(100);
+              stepper.setSpeed(step_speed);
+              stepper.disableOutputs();
+
+          }
+          break;
+        case 'z': // tests
+          {
+              for(int n = 0; n < SERVO_CNT; n++)
+              {
+                servoWrite(n, 100);
+                delay(500);
+                servoOff(n);
+                delay(250);
+              }
+
+              stepper.enableOutputs();
+              stepper.setCurrentPosition(0);
+              stepper.runRelative(100);
+              stepper.setSpeed(step_speed);
+              stepper.disableOutputs();
+
+          }
+          break;
         default:
           break;
       }
@@ -497,7 +567,7 @@ String getValue(String data, char separator, int index)
         }
     }
 
-    return chunkVal;   
+    return chunkVal;
 }
 
 int getRetractDistance(int sel) {
@@ -530,4 +600,27 @@ int getSlowerMargin(int sel) {
   } else {
     return -slower_margin[sel];
   }
+}
+
+void servoWrite(uint8_t i, uint16_t value)
+{
+  if(value < SERVO_MIN_MS)
+  {  // treat values less than 544 as angles in degrees (valid values in microseconds are handled as microseconds)
+    if(value < 0) value = 0;
+    if(value > 180) value = 180;
+    value = map(value, 0, 180, SERVO_MIN_MS,  SERVO_MAX_MS);
+  }
+  servoController.writeMicroseconds(i, value);
+}
+
+void servoOn(uint8_t i)
+{
+  servoWrite(i, servo_on_deg[i]);
+}
+
+void servoOff(uint8_t i)
+{
+  servoWrite(i, servo_off_deg[i]);
+  delay(250);
+  servoController.setPWM(i, 0, 0);
 }
